@@ -1,0 +1,198 @@
+#install pakages
+### Code for GovHack 2023
+
+#package install
+install.packages(c("httr", "jsonlite","tidyverse","janitor","xlsx"))
+
+#load libraries
+library(tidyverse)
+library(janitor)
+library(httr)
+library(jsonlite)
+
+#import wgea data and IP data
+wgea <- read_csv("~/Desktop/Govhack2023/data/wgea/2022_publicdatafile.csv") %>% 
+  clean_names()
+
+#access patent data 
+url_patent_applications <- "https://data.gov.au/data/dataset/49017fd0-e7be-4fc0-88c8-046fc366d980/resource/e0f36eb0-7c83-4bff-a66b-2ba128f07d56/download/patent-application.csv"
+patent_applications <- content(GET(url_patent_applications))
+url_patent_party_activity <- "https://data.gov.au/data/dataset/49017fd0-e7be-4fc0-88c8-046fc366d980/resource/7d8c5138-60d9-4993-b7c9-ecbec25bd57f/download/patent-party-activity.csv"
+patent_party_activity <- content(GET(url_patent_party_activity)) %>% 
+  filter(party_role == "applicant") %>% 
+  group_by(abn) %>% 
+  summarise(n_patents=n())
+
+#ato occupation gender data
+ato <-readxl("~/Downloads/")
+  
+#domestic violence policy or strategy - 3491 report yes which is 3491/4794 or 72.8%
+dv_policy_strategy <- wgea %>% 
+  filter(split_level_1_selection_group == "Formal policy or strategy to support employees experiencing family or domestic violence", split_detail == "Policy or strategy") %>% 
+  group_by(split_answer) %>% 
+  summarise(n=n())
+
+wgea_dv_policy_strategy <- wgea %>% 
+  filter(split_level_1_selection_group == "Formal policy or strategy to support employees experiencing family or domestic violence", split_detail == "Policy or strategy") %>% 
+  mutate(has_dv_policy_strategy = 1) %>% 
+  select(abn,has_dv_policy_strategy)
+
+
+#formal flexible work policy - 3925/4794 organisations reporting 'yes' which is 81.9%, others assumed no, in line with WGEA 
+reporting_flexible_work_policies <- wgea %>% 
+  filter(split_level_1_selection_group == "Formal policy or strategy on flexible work arrangements"
+         , split_detail == "Policy or strategy") %>% 
+  pivot_wider(names_from = split_answer, values_from = value) %>% 
+  clean_names() 
+
+wgea_reporting_flexible_work_policies <- wgea %>% 
+  filter(split_level_1_selection_group == "Formal policy or strategy on flexible work arrangements"
+         , split_detail == "Policy or strategy") %>% 
+  pivot_wider(names_from = split_answer, values_from = value) %>% 
+  clean_names() %>% 
+  mutate(has_flexible_work_policy = Yes) %>% 
+  select(abn,has_flexible_work_policy)
+
+#board composition checked
+board_composition <- wgea %>% 
+  filter(split_level_1_selection_group %in% c("Total number of female board members",
+         "Total number of male board members",
+         "Total number of gender X board members")) %>% 
+  pivot_wider(names_from = split_level_1_selection_group, values_from = value) %>% 
+  clean_names() %>% 
+  rename(female = total_number_of_female_board_members, male = total_number_of_male_board_members,
+         gender_x = total_number_of_gender_x_board_members) %>% 
+  mutate(male = replace_na(male,0),female = replace_na(female,0),gender_x = replace_na(gender_x,0)) %>% 
+  summarise(male = sum(male), female = sum(female),gender_x = sum(gender_x)) %>% 
+  mutate(total_board_members = male+female+gender_x, percent_non_male = (female+gender_x)/total_board_members*100) %>% 
+  summarise(mean_percent_non_male = mean(percent_non_male))
+
+#paid parental leave - primary - checked
+offer_paid_parental_leave_primary <- wgea %>% 
+ filter(split_level_1_selection_group == "Employer-funded paid parental leave for primary carers") %>% 
+  group_by(abn) %>% 
+  summarise(split_answer = first(split_answer)) %>% 
+  group_by(split_answer) %>% 
+  summarise(n=n()) %>% 
+  mutate(percent_of_total = n / 4794*100) 
+
+#paid parental leave - secondary
+offer_paid_parental_leave_secondary <- wgea %>% 
+  filter(split_level_1_selection_group == "Employer-funded paid parental leave for secondary carers") %>% 
+  group_by(abn) %>% 
+  summarise(split_answer = first(split_answer)) %>% 
+  group_by(split_answer) %>% 
+  summarise(n=n()) %>% 
+  mutate(percent_of_total = n / 4794*100) 
+
+
+wgea_offer_paid_parental_leave_secondary <- wgea %>% 
+  filter(split_level_1_selection_group == "Employer-funded paid parental leave for secondary carers") %>% 
+  group_by(abn) %>% 
+  summarise(split_answer = first(split_answer)) 
+
+#stats on how many women CEOs there are overall - aligns with report
+ceo_gender_split <- wgea %>% 
+  filter(split_detail == "CEO") %>% 
+  pivot_wider(names_from = split_answer, values_from = value) %>% 
+  clean_names() %>% 
+  mutate(male = replace_na(male,0),female = replace_na(female,0),gender_x = replace_na(gender_x,0)) %>% 
+  summarise(male = sum(male), female = sum(female),gender_x = sum(gender_x)) %>% 
+  mutate(total_ceo = male+female+gender_x, percent_non_male = (female+gender_x)/total_ceo*100) %>% 
+  summarise(mean_percent_non_male = mean(percent_non_male))
+
+wgea_ceo_genders <- wgea %>% 
+  filter(split_detail == "CEO") %>% 
+  pivot_wider(names_from = split_answer, values_from = value) %>% 
+  clean_names() %>% 
+  mutate(male = replace_na(male,0),female = replace_na(female,0),gender_x = replace_na(gender_x,0)) %>% 
+  group_by(abn) %>% 
+  summarise(male = sum(male), female = sum(female), gender_x = sum(gender_x)) %>% 
+  rename(male_ceos = male, female_ceos = female, gender_x_ceos = gender_x)
+
+n_distinct(wgea_ceo_genders$abn)
+
+# stats on key management personnel gender balance - average % women and gender non conforming - unchecked
+key_management_personnel_split <- wgea %>% 
+  filter(split_detail == "Key management personnel (KMP)") %>% 
+  pivot_wider(names_from = split_answer, values_from = value) %>% 
+  clean_names() %>% 
+  mutate(male = replace_na(male,0),female = replace_na(female,0),gender_x = replace_na(gender_x,0)) %>% 
+  group_by(abn) %>% 
+  summarise(male = sum(male), female = sum(female),gender_x = sum(gender_x)) %>% 
+  mutate(total_kmp = male+female+gender_x, percent_non_male = (female+gender_x)/total_kmp*100) %>% 
+  summarise(mean_percent_non_male = mean(percent_non_male))
+
+
+wgea_key_management_personnel <- wgea %>% 
+  filter(split_detail == "Key management personnel (KMP)") %>% 
+  pivot_wider(names_from = split_answer, values_from = value) %>% 
+  clean_names() %>% 
+  mutate(male = replace_na(male,0),female = replace_na(female,0),gender_x = replace_na(gender_x,0)) %>% 
+  group_by(abn) %>% 
+  summarise(male_kpm = sum(male), female_kmp = sum(female),gender_x_kmp = sum(gender_x)) 
+
+#clean wgea
+wgea_clean <- wgea %>% 
+  select(abn,high_level_grouping,split_answer,split_level_1_selection_group,value) %>% 
+
+#patents and wgea
+patents_wgea_all <- merge(patent_party_activity, wgea_ceo_genders, by = "abn") %>% 
+  left_join(wgea_dv_policy_strategy, by= "abn") %>% 
+  mutate(has_dv_policy_strategy = replace_na(has_dv_policy_strategy,0)) %>% 
+  mutate(has_dv_policy_strategy = case_when(has_dv_policy_strategy ==1 ~'Yes',
+         TRUE ~ 'No')) %>% 
+  left_join(wgea_reporting_flexible_work_policies, by = "abn") %>% 
+  mutate(has_flexible_work_policy = replace_na(has_dv_policy_strategy,'No')) %>% 
+  mutate(value=1)
+
+table(patents_wgea_all$has_dv_policy_strategy)
+table(patents_wgea_all$has_flexible_work_policy)
+
+
+#75th percentile is 21 so this will be the definition of 'top'
+quantile(patents_wgea_all$n, probs = c(.25, .5, .75))
+
+write_csv(patents_wgea_all,"~/Desktop/Govhack2023/data/patents_wgea_all.csv")
+
+patents_wgea_top <-patents_wgea_all %>% 
+  filter(n_patents>=21)
+
+write_csv(patents_wgea_top,"~/Desktop/Govhack2023/data/patents_wgea_top.csv")
+
+table(patents_wgea_top$has_dv_policy_strategy)
+
+
+patents_wgea_top <- patents_wgea %>% 
+  filter(n_patents>=21)
+
+# CEO gender balance in patents - 704 male CEOs and 101 female CEOs
+ceo_gender_balance <- patents_wgea %>% 
+  summarise(male_ceos = sum(male_ceos),female_ceos = sum(female_ceos), gender_x_ceos = sum(gender_x_ceos))
+
+
+men <- rep(list("Male CEOs"),704)
+women <- rep(list("Female CEOs"),101)
+ceo_gender_balance_list <- list(gender = c(rep(("man"),704),rep(("woman"),101)))
+ceo_gender_balance_flourish <- as.data.frame(ceo_gender_balance_list$gender) %>% 
+  mutate(value=1)
+
+
+#top companies - 164 male, 39 female
+ceo_gender_balance_top <- patents_wgea_top %>% 
+  summarise(male_ceos = sum(male_ceos),female_ceos = sum(female_ceos), gender_x_ceos = sum(gender_x_ceos))
+
+write_csv(ceo_gender_balance_top,"~/Desktop/Govhack2023/data/ceo_gender_balance_top_flourish.csv")
+write_csv(ceo_gender_balance_flourish,"~/Desktop/Govhack2023/data/ceo_gender_balance_flourish.csv")
+
+#analysis of 2021 ATO data for professional, scientific and technical services
+ato_data <- read_csv("~/Desktop/Govhack2023/ATO data.csv") %>%
+  rename(na = "...1",gender = "...2",state = "...3",category = "...4",number = "...5",number_taxable = "...6",salary="...7") %>% 
+  slice(-1) %>% 
+  mutate(number = as.numeric(gsub(",","",number)), salary = as.numeric(gsub(",","",salary))) %>% 
+  group_by(gender) %>% 
+  summarise(number = sum(number),salary = sum(salary)) %>% 
+  mutate(average_salary = salary/number)
+                             
+
+    
